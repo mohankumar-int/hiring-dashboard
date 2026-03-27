@@ -1,8 +1,20 @@
+# Data files — never commit these
 *.xlsx
 *.xls
 *.csv
+
+# Local launcher (only needed for Claude Code preview sandbox)
+start.sh
+
+# Python virtual environment
+.venv/
 __pycache__/
 *.pyc
-.env
+*.pyo
+*.pyd
+
+# macOS
 .DS_Store
-start.sh
+
+# Environment variables
+.env
