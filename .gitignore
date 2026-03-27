@@ -1,21 +1,8 @@
-# Data files — never commit sensitive hiring data
 *.xlsx
 *.xls
 *.csv
-
-# Local launcher (only needed for local preview sandbox workaround)
-start.sh
-
-# Python
 __pycache__/
-*.py[cod]
-*.egg-info/
+*.pyc
 .env
-.venv/
-venv/
-
-# macOS
 .DS_Store
-
-# Streamlit local session cache
-.streamlit/secrets.toml
+start.sh
