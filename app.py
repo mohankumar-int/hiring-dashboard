@@ -332,6 +332,32 @@ H_CAREER_TRACK = "Career Track"
 H_COMMUNITY    = "Community"
 H_TECH_COMM    = "Tech Community"
 
+# Actual Hires YTD column constants
+A_NAME         = "Employee Name"
+A_HIRE_DATE    = "Hire Date"
+A_HIRE_TYPE    = "Hire Type"
+A_BAND         = "Band"
+A_MANAGER      = "Manager"
+A_TECH_COMM    = "Tech Community"
+A_COMMUNITY    = "Community"
+A_JOB_CODE     = "Job Code"
+A_JOB_LEVEL    = "Job Level"
+A_JOB_FAMILY   = "Job Family"
+A_JOB_FAM_GRP  = "Job Family Group"
+A_JOB_TITLE    = "Job Title"
+A_CAREER_TRACK = "Career Track"
+A_MGT_LEVEL    = "Management Level"
+A_L2           = "Org Level 2"
+A_L3           = "Org Level 3"
+A_L4           = "Org Level 4"
+A_L5           = "Org Level 5"
+A_SITE         = "Business Site"
+A_STATE        = "State"
+A_COUNTRY      = "Country"
+A_AS_OF_DATE   = "As Of Date"
+A_FISCAL_MONTH = "Fiscal Month"
+A_FISCAL_YEAR  = "Fiscal Year"
+
 # ── Data loading ──────────────────────────────────────────────────────────────
 @st.cache_data(show_spinner=False)
 def load_open_reqs(raw: bytes) -> pd.DataFrame:
@@ -347,6 +373,17 @@ def load_expected_hires(raw: bytes) -> pd.DataFrame:
     df["_month_sort"] = df[H_START_DATE].dt.to_period("M")
     df["Month"]       = df["_month_sort"].astype(str)
     df["Month Label"] = df[H_START_DATE].dt.strftime("%b %Y")
+    return df
+
+@st.cache_data(show_spinner=False)
+def load_actual_hires(raw: bytes) -> pd.DataFrame:
+    df = pd.read_excel(raw)
+    df.columns = [c.strip() for c in df.columns]
+    df[A_HIRE_DATE]   = pd.to_datetime(df[A_HIRE_DATE],   errors="coerce")
+    df[A_AS_OF_DATE]  = pd.to_datetime(df[A_AS_OF_DATE],  errors="coerce")
+    df["_month_sort"] = df[A_HIRE_DATE].dt.to_period("M")
+    df["Month"]       = df["_month_sort"].astype(str)
+    df["Month Label"] = df[A_HIRE_DATE].dt.strftime("%b %Y")
     return df
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -392,6 +429,7 @@ with st.sidebar:
 
     open_reqs_upload     = st.file_uploader("Open Hiring Requisitions (.xlsx)", type=["xlsx"], key="up_reqs")
     expected_hire_upload = st.file_uploader("Expected Hires (.xlsx)",           type=["xlsx"], key="up_hires")
+    actual_hire_upload   = st.file_uploader("Actual Hires YTD (.xlsx)",         type=["xlsx"], key="up_actual")
 
     st.markdown("---")
     st.markdown(f"<small style='color:#888'>Intuit Talent Acquisition · FY26</small>", unsafe_allow_html=True)
@@ -407,6 +445,11 @@ if expected_hire_upload:
     save_to_cache("hires", raw)
     st.session_state["hires_bytes"] = raw
 
+if actual_hire_upload:
+    raw = actual_hire_upload.read()
+    save_to_cache("actual_hires", raw)
+    st.session_state["actual_hires_bytes"] = raw
+
 # On first load, pull from disk cache if session is empty
 if "reqs_bytes" not in st.session_state:
     cached = load_from_cache("reqs")
@@ -418,30 +461,39 @@ if "hires_bytes" not in st.session_state:
     if cached:
         st.session_state["hires_bytes"] = cached
 
-reqs_bytes  = st.session_state.get("reqs_bytes")
-hires_bytes = st.session_state.get("hires_bytes")
+if "actual_hires_bytes" not in st.session_state:
+    cached = load_from_cache("actual_hires")
+    if cached:
+        st.session_state["actual_hires_bytes"] = cached
+
+reqs_bytes         = st.session_state.get("reqs_bytes")
+hires_bytes        = st.session_state.get("hires_bytes")
+actual_hires_bytes = st.session_state.get("actual_hires_bytes")
 
 # ── Header ────────────────────────────────────────────────────────────────────
 st.markdown("<h1>Intuit Hiring Dashboard</h1>", unsafe_allow_html=True)
 
 # Timestamp banner
 meta = load_meta()
-ts_reqs  = meta.get("reqs",  "not loaded")
-ts_hires = meta.get("hires", "not loaded")
+ts_reqs   = meta.get("reqs",         "not loaded")
+ts_hires  = meta.get("hires",        "not loaded")
+ts_actual = meta.get("actual_hires", "not loaded")
 st.markdown(
     f"<div class='ts-banner'>"
-    f"Open Reqs data as of: <strong>{ts_reqs}</strong> &nbsp;|&nbsp; "
-    f"Expected Hires data as of: <strong>{ts_hires}</strong>"
+    f"Open Reqs: <strong>{ts_reqs}</strong> &nbsp;|&nbsp; "
+    f"Expected Hires: <strong>{ts_hires}</strong> &nbsp;|&nbsp; "
+    f"Actual Hires YTD: <strong>{ts_actual}</strong>"
     f"</div>",
     unsafe_allow_html=True,
 )
 
-if not reqs_bytes and not hires_bytes:
-    st.info("Upload one or both data files in the sidebar to get started.")
+if not reqs_bytes and not hires_bytes and not actual_hires_bytes:
+    st.info("Upload one or more data files in the sidebar to get started.")
     st.stop()
 
-df_reqs  = load_open_reqs(reqs_bytes)   if reqs_bytes  else None
-df_hires = load_expected_hires(hires_bytes) if hires_bytes else None
+df_reqs         = load_open_reqs(reqs_bytes)             if reqs_bytes         else None
+df_hires        = load_expected_hires(hires_bytes)       if hires_bytes        else None
+df_actual_hires = load_actual_hires(actual_hires_bytes)  if actual_hires_bytes else None
 
 # Pipeline IDs that have expected hires
 pipeline_ids_with_offers: set = set()
@@ -455,7 +507,7 @@ if df_reqs is not None:
     )
 
 # ══════════════════════════════════════════════════════════════════════════════
-tab1, tab2 = st.tabs(["  Open Hiring Requisitions  ", "  Expected Hires  "])
+tab1, tab2, tab3 = st.tabs(["  Open Hiring Requisitions  ", "  Expected Hires  ", "  Actual Hires YTD  "])
 
 # ─────────────────────────────────────────────────────────────────────────────
 # TAB 1
@@ -702,7 +754,17 @@ with tab2:
         st.warning("Upload the **Expected Hires** file in the sidebar.")
     else:
         # ── Filters ──────────────────────────────────────────────────────────
+        # ── Start-date toggle ─────────────────────────────────────────────────
+        today = datetime.now().date()
         st.markdown("<div class='filter-card'>", unsafe_allow_html=True)
+        h_start_toggle = st.radio(
+            "Start Date Status",
+            ["All", "Started (start date before today)", "Starting on/after today"],
+            horizontal=True,
+            key="h_start_toggle",
+            help=f"Today's date: {today.strftime('%d %b %Y')}",
+        )
+
         st.markdown("**Filters**")
 
         # Row 1 — Employee Type (first, default Employee) + Org hierarchy
@@ -776,6 +838,11 @@ with tab2:
         if hct  and H_CAREER_TRACK in fh.columns: fh = ms_filter(fh, H_CAREER_TRACK, hct)
         if hcom and H_COMMUNITY    in fh.columns: fh = ms_filter(fh, H_COMMUNITY,    hcom)
         if htc  and H_TECH_COMM    in fh.columns: fh = ms_filter(fh, H_TECH_COMM,    htc)
+
+        if h_start_toggle == "Started (start date before today)":
+            fh = fh[fh[H_START_DATE].dt.date < today]
+        elif h_start_toggle == "Starting on/after today":
+            fh = fh[fh[H_START_DATE].dt.date >= today]
 
         # ── Metrics ──────────────────────────────────────────────────────────
         hm1, hm2, hm3, hm4 = st.columns(4)
@@ -888,4 +955,194 @@ with tab2:
             "Download Expected Hires (CSV)",
             hire_tbl.to_csv(index=False).encode("utf-8"),
             "expected_hires_filtered.csv", "text/csv",
+        )
+
+# ─────────────────────────────────────────────────────────────────────────────
+# TAB 3 — Actual Hires YTD
+# ─────────────────────────────────────────────────────────────────────────────
+with tab3:
+    if df_actual_hires is None:
+        st.warning("Upload the **Actual Hires YTD** file in the sidebar.")
+    else:
+        # Derive the upload/as-of date from the file (use max As Of Date)
+        as_of_date = df_actual_hires[A_AS_OF_DATE].max()
+
+        st.markdown("<div class='filter-card'>", unsafe_allow_html=True)
+        st.markdown("**Filters**")
+
+        # Row 1 — Org hierarchy
+        af1a, af1b, af1c, af1d = st.columns(4)
+        with af1a:
+            al2 = st.multiselect("Org Level 2", clean_options(df_actual_hires[A_L2]), key="a_l2")
+        with af1b:
+            al3 = st.multiselect("Org Level 3", clean_options(df_actual_hires[A_L3]), key="a_l3")
+        with af1c:
+            al4 = st.multiselect("Org Level 4", clean_options(df_actual_hires[A_L4]), key="a_l4")
+        with af1d:
+            aband = st.multiselect("Band", clean_options(df_actual_hires[A_BAND]), key="a_band")
+
+        # Row 2 — Job dimensions
+        af2a, af2b, af2c, af2d = st.columns(4)
+        with af2a:
+            ajfg = st.multiselect("Job Family Group", clean_options(df_actual_hires[A_JOB_FAM_GRP]), key="a_jfg")
+        with af2b:
+            ajf  = st.multiselect("Job Family",       clean_options(df_actual_hires[A_JOB_FAMILY]),  key="a_jf")
+        with af2c:
+            ajl  = st.multiselect("Job Level",        clean_options(df_actual_hires[A_JOB_LEVEL]),   key="a_jl")
+        with af2d:
+            aht  = st.multiselect("Hire Type",        clean_options(df_actual_hires[A_HIRE_TYPE]),   key="a_ht")
+
+        # Row 3 — People & Track
+        af3a, af3b, af3c, af3d = st.columns(4)
+        with af3a:
+            act  = st.multiselect("Career Track",   clean_options(df_actual_hires[A_CAREER_TRACK]), key="a_ct")
+        with af3b:
+            acom = st.multiselect("Community",      clean_options(df_actual_hires[A_COMMUNITY]),    key="a_com")
+        with af3c:
+            atc  = st.multiselect("Tech Community", clean_options(df_actual_hires[A_TECH_COMM]),    key="a_tc")
+        with af3d:
+            afy  = st.multiselect("Fiscal Year",    clean_options(df_actual_hires[A_FISCAL_YEAR]),  key="a_fy")
+
+        st.markdown("</div>", unsafe_allow_html=True)
+
+        fa = df_actual_hires.copy()
+
+        # Apply filters
+        fa = ms_filter(fa, A_L2,           al2)
+        fa = ms_filter(fa, A_L3,           al3)
+        fa = ms_filter(fa, A_L4,           al4)
+        fa = ms_filter(fa, A_BAND,         aband)
+        fa = ms_filter(fa, A_JOB_FAM_GRP,  ajfg)
+        fa = ms_filter(fa, A_JOB_FAMILY,   ajf)
+        fa = ms_filter(fa, A_JOB_LEVEL,    ajl)
+        fa = ms_filter(fa, A_HIRE_TYPE,    aht)
+        fa = ms_filter(fa, A_CAREER_TRACK, act)
+        fa = ms_filter(fa, A_COMMUNITY,    acom)
+        fa = ms_filter(fa, A_TECH_COMM,    atc)
+        fa = ms_filter(fa, A_FISCAL_YEAR,  afy)
+
+        # ── Metrics ───────────────────────────────────────────────────────────
+        already_started = (fa[A_HIRE_DATE] < as_of_date).sum() if pd.notna(as_of_date) else len(fa)
+        upcoming        = (fa[A_HIRE_DATE] >= as_of_date).sum() if pd.notna(as_of_date) else 0
+        am1, am2, am3, am4 = st.columns(4)
+        am1.metric("Total Hires YTD",   f"{len(fa):,}")
+        am2.metric("Already Started",   f"{already_started:,}")
+        am3.metric("Starting Soon",      f"{upcoming:,}")
+        am4.metric("L3 Orgs",           f"{fa[A_L3].nunique():,}")
+
+        st.markdown("---")
+
+        # ── Monthly trend ─────────────────────────────────────────────────────
+        st.markdown("<p class='section-label'>Actual Hires by Month</p>", unsafe_allow_html=True)
+        a_monthly = (
+            fa.groupby(["Month", "Month Label"]).size()
+            .reset_index(name="Hires").sort_values("Month")
+        )
+        fig_a_trend = px.bar(a_monthly, x="Month Label", y="Hires",
+                             color_discrete_sequence=[GREEN])
+        fig_a_trend.update_traces(marker_line_color=WHITE, marker_line_width=1)
+        fig_a_trend.update_layout(**chart_base(), height=280,
+                                  xaxis_title="", yaxis_title="# Actual Hires",
+                                  bargap=0.25)
+        st.plotly_chart(fig_a_trend, use_container_width=True)
+
+        st.markdown("---")
+
+        # ── Table 1: Month × L3 Org ───────────────────────────────────────────
+        st.markdown("<p class='section-label'>Actual Hires by Month × L3 Org</p>", unsafe_allow_html=True)
+        a_piv_l3 = fa.pivot_table(index=A_L3, columns="Month", aggfunc="size", fill_value=0)
+        a_piv_l3 = a_piv_l3.reindex(sorted(a_piv_l3.columns), axis=1)
+        a_piv_l3["Total"] = a_piv_l3.sum(axis=1)
+        a_piv_l3 = a_piv_l3.sort_values("Total", ascending=False)
+        a_grand_l3 = a_piv_l3.sum(); a_grand_l3.name = "Grand Total"
+        a_piv_l3 = pd.concat([a_piv_l3, a_grand_l3.to_frame().T])
+        a_piv_l3.index.name = "L3 Org"
+        st.dataframe(a_piv_l3, use_container_width=True)
+
+        st.markdown("---")
+
+        # ── Table 2: Month × Job Level ────────────────────────────────────────
+        st.markdown("<p class='section-label'>Actual Hires by Month × Job Level</p>", unsafe_allow_html=True)
+        a_piv_jl = fa.pivot_table(index=A_JOB_LEVEL, columns="Month", aggfunc="size", fill_value=0)
+        a_piv_jl = a_piv_jl.reindex(sorted(a_piv_jl.columns), axis=1)
+        a_piv_jl["Total"] = a_piv_jl.sum(axis=1)
+        a_piv_jl = a_piv_jl.sort_values("Total", ascending=False)
+        a_grand_jl = a_piv_jl.sum(); a_grand_jl.name = "Grand Total"
+        a_piv_jl = pd.concat([a_piv_jl, a_grand_jl.to_frame().T])
+        a_piv_jl.index.name = "Job Level"
+        st.dataframe(a_piv_jl, use_container_width=True)
+
+        st.markdown("---")
+
+        # ── Table 3: L3 Org × Job Level ───────────────────────────────────────
+        st.markdown("<p class='section-label'>Actual Hires by L3 Org × Job Level</p>", unsafe_allow_html=True)
+        a_piv_l3jl = fa.pivot_table(index=A_L3, columns=A_JOB_LEVEL, aggfunc="size", fill_value=0)
+        a_piv_l3jl["Total"] = a_piv_l3jl.sum(axis=1)
+        a_piv_l3jl = a_piv_l3jl.sort_values("Total", ascending=False)
+        a_grand_l3jl = a_piv_l3jl.sum(); a_grand_l3jl.name = "Grand Total"
+        a_piv_l3jl = pd.concat([a_piv_l3jl, a_grand_l3jl.to_frame().T])
+        a_piv_l3jl.index.name = "L3 Org"
+        st.dataframe(a_piv_l3jl, use_container_width=True)
+
+        st.markdown("---")
+
+        # ── Table 4: Hire Type & Band summary ─────────────────────────────────
+        st.markdown("<p class='section-label'>Actual Hires by Hire Type & Band</p>", unsafe_allow_html=True)
+        atc1, atc2 = st.columns(2)
+        with atc1:
+            aht_tbl = simple_summary(fa.replace("-", pd.NA).dropna(subset=[A_HIRE_TYPE]), A_HIRE_TYPE)
+            aht_tbl.columns = ["Hire Type", "Count"]
+            st.dataframe(aht_tbl, use_container_width=True, hide_index=True)
+        with atc2:
+            aband_tbl = simple_summary(fa.replace("-", pd.NA).dropna(subset=[A_BAND]), A_BAND)
+            aband_tbl.columns = ["Band", "Count"]
+            st.dataframe(aband_tbl, use_container_width=True, hide_index=True)
+
+        st.markdown("---")
+
+        # ── Detail table ──────────────────────────────────────────────────────
+        st.markdown("<p class='section-label'>Actual Hires Detail</p>", unsafe_allow_html=True)
+        st.caption(f"Sorted: L3 Org → Job Level → Hire Date  ·  {len(fa):,} rows")
+
+        actual_col_map = {
+            A_NAME:         "Employee Name",
+            A_HIRE_DATE:    "Hire Date",
+            A_HIRE_TYPE:    "Hire Type",
+            A_BAND:         "Band",
+            A_MANAGER:      "Manager",
+            A_L2:           "Org Level 2",
+            A_L3:           "Org Level 3",
+            A_L4:           "Org Level 4",
+            A_JOB_LEVEL:    "Job Level",
+            A_JOB_TITLE:    "Job Title",
+            A_JOB_FAMILY:   "Job Family",
+            A_JOB_FAM_GRP:  "Job Family Group",
+            A_CAREER_TRACK: "Career Track",
+            A_COMMUNITY:    "Community",
+            A_TECH_COMM:    "Tech Community",
+            A_SITE:         "Business Site",
+            A_COUNTRY:      "Country",
+            A_FISCAL_MONTH: "Fiscal Month",
+            A_FISCAL_YEAR:  "Fiscal Year",
+        }
+        acols = [c for c in actual_col_map if c in fa.columns]
+        actual_tbl = (
+            fa[acols].rename(columns=actual_col_map)
+            .sort_values(["Org Level 3", "Job Level", "Hire Date"])
+            .reset_index(drop=True)
+        )
+
+        def actual_row_style(row):
+            if pd.notna(as_of_date) and pd.notna(row.get("Hire Date")) and row["Hire Date"] >= as_of_date:
+                return ["background-color:#FFF3E0; color:#1A1A2E"] * len(row)
+            return [""] * len(row)
+
+        st.dataframe(
+            actual_tbl.style.apply(actual_row_style, axis=1),
+            use_container_width=True, height=480,
+        )
+        st.download_button(
+            "Download Actual Hires YTD (CSV)",
+            actual_tbl.to_csv(index=False).encode("utf-8"),
+            "actual_hires_ytd_filtered.csv", "text/csv",
         )
