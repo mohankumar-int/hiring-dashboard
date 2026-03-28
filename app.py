@@ -1,10 +1,17 @@
 import os
+import io
 import json
 import streamlit as st
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
-from datetime import datetime
+from datetime import datetime, date, timedelta
+from docx import Document
+from docx.shared import Pt, RGBColor, Inches, Cm
+from docx.enum.text import WD_ALIGN_PARAGRAPH
+from docx.enum.table import WD_TABLE_ALIGNMENT
+from docx.oxml.ns import qn
+from docx.oxml import OxmlElement
 
 # ── Intuit brand palette ──────────────────────────────────────────────────────
 BLUE    = "#0077C5"
@@ -507,7 +514,7 @@ if df_reqs is not None:
     )
 
 # ══════════════════════════════════════════════════════════════════════════════
-tab1, tab2, tab3 = st.tabs(["  Open Hiring Requisitions  ", "  Expected Hires  ", "  Actual Hires YTD  "])
+tab1, tab2, tab3, tab4 = st.tabs(["  Open Hiring Requisitions  ", "  Expected Hires  ", "  Actual Hires YTD  ", "  Reports  "])
 
 # ─────────────────────────────────────────────────────────────────────────────
 # TAB 1
@@ -1146,3 +1153,431 @@ with tab3:
             actual_tbl.to_csv(index=False).encode("utf-8"),
             "actual_hires_ytd_filtered.csv", "text/csv",
         )
+
+# ══════════════════════════════════════════════════════════════════════════════
+# REPORT GENERATION HELPERS
+# ══════════════════════════════════════════════════════════════════════════════
+
+def _set_cell_bg(cell, hex_color: str):
+    tc   = cell._tc
+    tcPr = tc.get_or_add_tcPr()
+    shd  = OxmlElement("w:shd")
+    shd.set(qn("w:val"),   "clear")
+    shd.set(qn("w:color"), "auto")
+    shd.set(qn("w:fill"),  hex_color)
+    tcPr.append(shd)
+
+def _heading(doc, text, level=1):
+    p = doc.add_heading(text, level=level)
+    p.alignment = WD_ALIGN_PARAGRAPH.LEFT
+    run = p.runs[0] if p.runs else p.add_run(text)
+    run.font.color.rgb = RGBColor(0x1C, 0x2B, 0x3A)
+    run.font.name = "Arial"
+    return p
+
+def _para(doc, text, bold=False, size=10):
+    p = doc.add_paragraph()
+    run = p.add_run(text)
+    run.font.size  = Pt(size)
+    run.font.name  = "Arial"
+    run.font.bold  = bold
+    run.font.color.rgb = RGBColor(0x1C, 0x2B, 0x3A)
+    return p
+
+def _df_to_table(doc, df, col_widths=None):
+    df = df.reset_index(drop=False)
+    tbl = doc.add_table(rows=1, cols=len(df.columns))
+    tbl.style = "Table Grid"
+    tbl.alignment = WD_TABLE_ALIGNMENT.LEFT
+    hdr = tbl.rows[0].cells
+    for i, col in enumerate(df.columns):
+        hdr[i].text = str(col)
+        run = hdr[i].paragraphs[0].runs[0]
+        run.font.bold = True
+        run.font.size = Pt(9)
+        run.font.name = "Arial"
+        run.font.color.rgb = RGBColor(0xFF, 0xFF, 0xFF)
+        _set_cell_bg(hdr[i], "1C2B3A")
+    for _, row in df.iterrows():
+        cells = tbl.add_row().cells
+        for i, val in enumerate(row):
+            cells[i].text = str(val)
+            run = cells[i].paragraphs[0].runs[0]
+            run.font.size = Pt(9)
+            run.font.name = "Arial"
+    if col_widths:
+        for row in tbl.rows:
+            for i, cell in enumerate(row.cells):
+                if i < len(col_widths):
+                    cell.width = Inches(col_widths[i])
+    return tbl
+
+def _metric_table(doc, metrics: list):
+    """metrics = list of (label, value) tuples — renders as a single-row card table."""
+    tbl = doc.add_table(rows=2, cols=len(metrics))
+    tbl.style = "Table Grid"
+    for i, (label, value) in enumerate(metrics):
+        top = tbl.rows[0].cells[i]
+        top.text = str(label)
+        r = top.paragraphs[0].runs[0]
+        r.font.size = Pt(8); r.font.bold = True; r.font.name = "Arial"
+        r.font.color.rgb = RGBColor(0xFF, 0xFF, 0xFF)
+        _set_cell_bg(top, "0077C5")
+        bot = tbl.rows[1].cells[i]
+        bot.text = str(value)
+        r2 = bot.paragraphs[0].runs[0]
+        r2.font.size = Pt(14); r2.font.bold = True; r2.font.name = "Arial"
+        r2.font.color.rgb = RGBColor(0x1C, 0x2B, 0x3A)
+        bot.paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
+    return tbl
+
+def _rag_label(val, thresholds):
+    """Return 🟢 / 🟡 / 🔴 based on (green_min, amber_min)."""
+    g, a = thresholds
+    if val >= g: return "🟢"
+    if val >= a: return "🟡"
+    return "🔴"
+
+def build_report(
+    doc_type: str,          # "Weekly" | "Monthly"
+    period_label: str,
+    stale_days: int,
+    df_reqs,
+    df_hires,
+    df_actual,
+    today: date,
+) -> bytes:
+    doc = Document()
+
+    # ── Page margins (narrow) ────────────────────────────────────────────────
+    for section in doc.sections:
+        section.top_margin    = Cm(1.8)
+        section.bottom_margin = Cm(1.8)
+        section.left_margin   = Cm(2.0)
+        section.right_margin  = Cm(2.0)
+
+    # ════════════════════════════════════════════════════════════════════════
+    # COVER BLOCK
+    # ════════════════════════════════════════════════════════════════════════
+    doc.add_heading("Talent Acquisition Report", 0).runs[0].font.color.rgb = RGBColor(0x1C, 0x2B, 0x3A)
+    p = doc.add_paragraph()
+    p.add_run(f"{doc_type} Report  ·  {period_label}").font.size = Pt(11)
+    p.add_run(f"\nGenerated: {today.strftime('%d %b %Y')}").font.size = Pt(9)
+    doc.add_paragraph()
+
+    # ════════════════════════════════════════════════════════════════════════
+    # COMPUTE KEY NUMBERS
+    # ════════════════════════════════════════════════════════════════════════
+    today_ts = pd.Timestamp(today)
+
+    # Actual hires
+    total_actual = len(df_actual) if df_actual is not None else 0
+    actual_started = int((df_actual[A_HIRE_DATE] < today_ts).sum()) if df_actual is not None else 0
+    actual_upcoming = total_actual - actual_started
+
+    # Expected hires (plan proxy)
+    expected_past = 0
+    if df_hires is not None:
+        expected_past = int((df_hires[H_START_DATE] < today_ts).sum())
+
+    pct_plan = (actual_started / expected_past * 100) if expected_past > 0 else None
+
+    # Pipeline health
+    total_reqs   = len(df_reqs) if df_reqs is not None else 0
+    stale_reqs   = int((df_reqs[R_DAYS_OPEN] >= stale_days).sum()) if df_reqs is not None else 0
+    avg_days_open = float(df_reqs[R_DAYS_OPEN].mean()) if df_reqs is not None else 0
+    total_open   = int(df_reqs[R_REMAINING].sum()) if df_reqs is not None else 0
+
+    # Hiring velocity — month-over-month
+    velocity_note = ""
+    if df_actual is not None and len(df_actual) > 0:
+        mo_counts = (
+            df_actual.groupby("Month").size().reset_index(name="n").sort_values("Month")
+        )
+        if len(mo_counts) >= 2:
+            last_n  = int(mo_counts.iloc[-1]["n"])
+            prev_n  = int(mo_counts.iloc[-2]["n"])
+            delta   = last_n - prev_n
+            pct_chg = (delta / prev_n * 100) if prev_n > 0 else 0
+            direction = "up" if delta >= 0 else "down"
+            velocity_note = (
+                f"{mo_counts.iloc[-1]['Month']}: {last_n} hires "
+                f"({'+' if delta >= 0 else ''}{delta} / {pct_chg:+.0f}% vs prior month)"
+            )
+        elif len(mo_counts) == 1:
+            last_n = int(mo_counts.iloc[-1]["n"])
+            velocity_note = f"{mo_counts.iloc[-1]['Month']}: {last_n} hires (first month on record)"
+            direction = "steady"
+            delta = 0
+
+    # ════════════════════════════════════════════════════════════════════════
+    # SECTION 1 — EXECUTIVE SUMMARY
+    # ════════════════════════════════════════════════════════════════════════
+    _heading(doc, "Executive Summary", 1)
+
+    # Build narrative
+    plan_sentence = (
+        f"Against the {expected_past} expected hires with start dates to date, "
+        f"{actual_started} have been confirmed — representing "
+        f"{pct_plan:.0f}% of plan."
+        if pct_plan is not None
+        else f"{actual_started} candidates have started to date, with {actual_upcoming} "
+             f"more scheduled to start in the coming weeks."
+    )
+    pipeline_sentence = (
+        f"The pipeline currently carries {total_reqs:,} open requisitions "
+        f"({total_open:,} remaining openings), with an average of {avg_days_open:.0f} days open. "
+        f"{stale_reqs} req{'s' if stale_reqs != 1 else ''} "
+        f"{'have' if stale_reqs != 1 else 'has'} exceeded {stale_days} days "
+        f"and {'require' if stale_reqs != 1 else 'requires'} immediate attention."
+        if df_reqs is not None
+        else "Pipeline data is not currently loaded."
+    )
+    velocity_sentence = (
+        f"Hiring velocity: {velocity_note}."
+        if velocity_note
+        else "Insufficient data to calculate month-over-month hiring velocity."
+    )
+
+    _para(doc, f"{plan_sentence} {pipeline_sentence} {velocity_sentence}", size=10)
+    doc.add_paragraph()
+
+    # ── Headline metrics card ────────────────────────────────────────────────
+    plan_display = f"{pct_plan:.0f}% of plan" if pct_plan is not None else "Plan TBD"
+    _metric_table(doc, [
+        ("Actual Hires YTD",      f"{total_actual:,}"),
+        ("Already Started",       f"{actual_started:,}"),
+        ("vs. Expected (to date)", plan_display),
+        ("Open Reqs",             f"{total_reqs:,}"),
+        ("Stale Reqs (60+ days)", f"{stale_reqs:,}"),
+    ])
+    doc.add_paragraph()
+
+    # ════════════════════════════════════════════════════════════════════════
+    # SECTION 2 — WINS
+    # ════════════════════════════════════════════════════════════════════════
+    _heading(doc, "Wins", 1)
+
+    # Orgs at/above expected pace
+    if df_actual is not None and df_hires is not None:
+        act_by_l2 = df_actual.groupby(A_L2).size().reset_index(name="Actual")
+        exp_by_l2 = (
+            df_hires[df_hires[H_START_DATE] < today_ts]
+            .groupby(H_L2).size().reset_index(name="Expected")
+        ) if H_L2 in df_hires.columns else pd.DataFrame(columns=[H_L2, "Expected"])
+        exp_by_l2 = exp_by_l2.rename(columns={H_L2: A_L2})
+        pace = act_by_l2.merge(exp_by_l2, on=A_L2, how="left").fillna(0)
+        pace["Expected"] = pace["Expected"].astype(int)
+        pace["vs Plan"] = pace["Actual"] - pace["Expected"]
+        ahead = pace[pace["vs Plan"] >= 0].sort_values("vs Plan", ascending=False)
+        behind = pace[pace["vs Plan"] < 0].sort_values("vs Plan")
+    else:
+        ahead = pd.DataFrame()
+        behind = pd.DataFrame()
+
+    # MoM improvement by org
+    mom_wins = pd.DataFrame()
+    if df_actual is not None and len(df_actual) > 0:
+        months_sorted = sorted(df_actual["Month"].unique())
+        if len(months_sorted) >= 2:
+            last_mo, prev_mo = months_sorted[-1], months_sorted[-2]
+            last_counts = df_actual[df_actual["Month"] == last_mo].groupby(A_L3).size().reset_index(name="This Month")
+            prev_counts = df_actual[df_actual["Month"] == prev_mo].groupby(A_L3).size().reset_index(name="Prior Month")
+            mom = last_counts.merge(prev_counts, on=A_L3, how="outer").fillna(0)
+            mom["This Month"]  = mom["This Month"].astype(int)
+            mom["Prior Month"] = mom["Prior Month"].astype(int)
+            mom["Change"]      = mom["This Month"] - mom["Prior Month"]
+            mom_wins = mom[mom["Change"] > 0].sort_values("Change", ascending=False).rename(columns={A_L3: "L3 Org"})
+
+    _para(doc, "Orgs at or above hiring pace (Actual ≥ Expected):", bold=True)
+    if not ahead.empty:
+        win_tbl = ahead[["Org Level 2", "Actual", "Expected", "vs Plan"]].rename(columns={"Org Level 2": "L2 Org"})
+        _df_to_table(doc, win_tbl.head(8))
+    else:
+        _para(doc, "Data not available — upload both Expected and Actual Hires files.")
+    doc.add_paragraph()
+
+    _para(doc, f"Month-over-month improvement (L3 Org, {prev_mo if len(months_sorted) >= 2 else '—'} → {last_mo if len(months_sorted) >= 2 else '—'}):", bold=True)
+    if not mom_wins.empty:
+        _df_to_table(doc, mom_wins[["L3 Org", "Prior Month", "This Month", "Change"]].head(8))
+    else:
+        _para(doc, "Insufficient monthly data for MoM comparison (need 2+ months of actuals).")
+    doc.add_paragraph()
+
+    # ════════════════════════════════════════════════════════════════════════
+    # SECTION 3 — HOTSPOTS
+    # ════════════════════════════════════════════════════════════════════════
+    _heading(doc, "Hotspots", 1)
+
+    # Stale reqs
+    _para(doc, f"Open Requisitions — Stale (≥ {stale_days} days open):", bold=True)
+    if df_reqs is not None:
+        stale = df_reqs[df_reqs[R_DAYS_OPEN] >= stale_days].copy()
+        if not stale.empty:
+            stale_display = stale[[R_L2, R_L3, R_JOB_TITLE, R_JOB_LEVEL, R_DAYS_OPEN, R_REMAINING, R_RECRUITER]].copy()
+            stale_display.columns = ["L2 Org", "L3 Org", "Job Title", "Level", "Days Open", "Remaining", "Recruiter"]
+            stale_display = stale_display.sort_values("Days Open", ascending=False).reset_index(drop=True)
+            _df_to_table(doc, stale_display.head(15))
+        else:
+            _para(doc, f"✅ No open reqs have exceeded {stale_days} days. Pipeline is healthy.")
+    else:
+        _para(doc, "Open Reqs file not loaded.")
+    doc.add_paragraph()
+
+    # Orgs behind pace
+    _para(doc, "Orgs behind hiring pace (Actual < Expected):", bold=True)
+    if not behind.empty:
+        behind_tbl = behind[["Org Level 2", "Actual", "Expected", "vs Plan"]].rename(columns={"Org Level 2": "L2 Org"})
+        _df_to_table(doc, behind_tbl.head(8))
+    else:
+        _para(doc, "All orgs are at or above expected pace — or Expected Hires file not loaded.")
+    doc.add_paragraph()
+
+    # ════════════════════════════════════════════════════════════════════════
+    # SECTION 4 — SUPPORTING DATA  (Monthly only / full depth)
+    # ════════════════════════════════════════════════════════════════════════
+    if doc_type == "Monthly":
+        _heading(doc, "Supporting Data", 1)
+
+        # Actual hires by month
+        _para(doc, "Actual Hires by Month", bold=True)
+        if df_actual is not None:
+            mo_tbl = (
+                df_actual.groupby(["Month", "Month Label"]).size()
+                .reset_index(name="Hires").sort_values("Month")
+                [["Month Label", "Hires"]]
+            )
+            mo_tbl.loc[len(mo_tbl)] = ["Total", mo_tbl["Hires"].sum()]
+            _df_to_table(doc, mo_tbl.rename(columns={"Month Label": "Month"}))
+        doc.add_paragraph()
+
+        # Pipeline by L2 org
+        _para(doc, "Open Requisitions by L2 Org", bold=True)
+        if df_reqs is not None:
+            l2_summary = (
+                df_reqs.groupby(R_L2)
+                .agg(Reqs=(R_PIPELINE_ID, "count"), Remaining=(R_REMAINING, "sum"), Avg_Days=(R_DAYS_OPEN, "mean"))
+                .reset_index()
+                .rename(columns={R_L2: "L2 Org", "Avg_Days": "Avg Days Open"})
+                .sort_values("Remaining", ascending=False)
+            )
+            l2_summary["Avg Days Open"] = l2_summary["Avg Days Open"].round(0).astype(int)
+            total_row = pd.DataFrame([{"L2 Org": "Total", "Reqs": l2_summary["Reqs"].sum(),
+                                        "Remaining": l2_summary["Remaining"].sum(),
+                                        "Avg Days Open": round(df_reqs[R_DAYS_OPEN].mean())}])
+            _df_to_table(doc, pd.concat([l2_summary, total_row], ignore_index=True))
+        doc.add_paragraph()
+
+        # Actual hires by L3 org × job level
+        _para(doc, "Actual Hires by L3 Org × Job Level", bold=True)
+        if df_actual is not None:
+            l3jl = df_actual.pivot_table(index=A_L3, columns=A_JOB_LEVEL, aggfunc="size", fill_value=0)
+            l3jl["Total"] = l3jl.sum(axis=1)
+            l3jl = l3jl.sort_values("Total", ascending=False)
+            grand = l3jl.sum(); grand.name = "Grand Total"
+            l3jl = pd.concat([l3jl, grand.to_frame().T])
+            l3jl.index.name = "L3 Org"
+            _df_to_table(doc, l3jl.reset_index())
+        doc.add_paragraph()
+
+        # Hire type breakdown
+        _para(doc, "Actual Hires by Hire Type", bold=True)
+        if df_actual is not None:
+            ht_tbl = df_actual.groupby(A_HIRE_TYPE).size().reset_index(name="Count").sort_values("Count", ascending=False)
+            ht_tbl.loc[len(ht_tbl)] = ["Total", ht_tbl["Count"].sum()]
+            _df_to_table(doc, ht_tbl.rename(columns={A_HIRE_TYPE: "Hire Type"}))
+        doc.add_paragraph()
+
+    # ── Footer ───────────────────────────────────────────────────────────────
+    doc.add_paragraph()
+    _para(doc, f"Confidential · Talent Acquisition · Generated {today.strftime('%d %b %Y')} · Data as uploaded to Intuit Hiring Dashboard", size=8)
+
+    buf = io.BytesIO()
+    doc.save(buf)
+    buf.seek(0)
+    return buf.read()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# TAB 4 — REPORTS
+# ─────────────────────────────────────────────────────────────────────────────
+with tab4:
+    st.markdown("### TA Director Report Generator")
+    st.caption("Generate a Word document report you can share with your SVP. All data comes from the files already loaded in the dashboard.")
+
+    any_data = df_reqs is not None or df_hires is not None or df_actual_hires is not None
+    if not any_data:
+        st.warning("Upload at least one data file in the sidebar to generate a report.")
+    else:
+        st.markdown("<div class='filter-card'>", unsafe_allow_html=True)
+
+        rc1, rc2, rc3 = st.columns(3)
+        with rc1:
+            report_type = st.radio("Report depth", ["Weekly", "Monthly"],
+                                   horizontal=True, key="rpt_type",
+                                   help="Weekly = Exec summary + wins + hotspots (1 page). Monthly = adds full supporting data tables.")
+        with rc2:
+            period_label = st.text_input("Period label (appears on cover)",
+                                          value=f"w/e {date.today().strftime('%d %b %Y')}" if True else "",
+                                          placeholder="e.g. Week ending 28 Mar 2026",
+                                          key="rpt_period")
+        with rc3:
+            stale_threshold = st.number_input("Stale req threshold (days)",
+                                               min_value=1, max_value=365, value=60, step=5,
+                                               key="rpt_stale")
+
+        st.markdown("</div>", unsafe_allow_html=True)
+
+        st.markdown("#### What will be in this report")
+        preview_cols = st.columns(3)
+        with preview_cols[0]:
+            st.markdown("""
+**📊 Executive Summary**
+- Narrative paragraph with key numbers
+- Hires YTD vs. expected (plan proxy)
+- Pipeline health snapshot
+- Hiring velocity (MoM)
+""")
+        with preview_cols[1]:
+            st.markdown("""
+**🏆 Wins**
+- Orgs at or above hiring pace
+- Month-over-month improvement by L3 org
+""")
+        with preview_cols[2]:
+            depth = "Full supporting tables included" if report_type == "Monthly" else "Headline metrics only"
+            st.markdown(f"""
+**🔥 Hotspots**
+- Reqs open ≥ {stale_threshold} days
+- Orgs behind expected hiring pace
+
+**📎 Supporting Data** ({'Monthly only' if report_type == 'Weekly' else '✅ included'})
+- {depth}
+""")
+
+        st.markdown("---")
+
+        if st.button(f"⬇️  Generate {report_type} Report", type="primary", key="rpt_generate"):
+            with st.spinner("Building your report…"):
+                try:
+                    doc_bytes = build_report(
+                        doc_type      = report_type,
+                        period_label  = period_label or f"{report_type} — {date.today().strftime('%d %b %Y')}",
+                        stale_days    = stale_threshold,
+                        df_reqs       = df_reqs,
+                        df_hires      = df_hires,
+                        df_actual     = df_actual_hires,
+                        today         = date.today(),
+                    )
+                    filename = f"TA_{report_type}_Report_{date.today().strftime('%Y%m%d')}.docx"
+                    st.success(f"✅ Report ready — click below to download.")
+                    st.download_button(
+                        label    = f"📄 Download {report_type} Report (.docx)",
+                        data     = doc_bytes,
+                        file_name= filename,
+                        mime     = "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                        key      = "rpt_download",
+                    )
+                except Exception as e:
+                    st.error(f"Report generation failed: {e}")
+                    st.exception(e)
