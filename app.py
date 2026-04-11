@@ -809,12 +809,20 @@ with tab2:
         with hf3d:
             hppc = st.multiselect("Priority Category", clean_options(df_hires[H_PRIORITY_CAT]) if H_PRIORITY_CAT in df_hires.columns else [], key="h_pricat")
 
-        # Row 4 — FY & Quarter
-        hf4a, hf4b, _, _ = st.columns(4)
+        # Row 4 — FY, Quarter & Start Month
+        hf4a, hf4b, hf4c, _ = st.columns(4)
         with hf4a:
             hfy  = st.multiselect("Target FY", clean_options(df_hires[H_TARGET_FY]),  key="h_fy")
         with hf4b:
             hqtr = st.multiselect("Quarter",   clean_options(df_hires[H_TARGET_QTR]), key="h_qtr")
+        with hf4c:
+            _month_opts = (
+                df_hires.dropna(subset=["_month_sort"])
+                .drop_duplicates(subset=["Month Label"])
+                .sort_values("_month_sort")["Month Label"]
+                .tolist()
+            )
+            hmonth = st.multiselect("Start Month", _month_opts, key="h_month")
 
         # Row 5 — Career Track / Community / Tech Community
         hf5a, hf5b, hf5c, _ = st.columns(4)
@@ -845,6 +853,7 @@ with tab2:
         if hct  and H_CAREER_TRACK in fh.columns: fh = ms_filter(fh, H_CAREER_TRACK, hct)
         if hcom and H_COMMUNITY    in fh.columns: fh = ms_filter(fh, H_COMMUNITY,    hcom)
         if htc  and H_TECH_COMM    in fh.columns: fh = ms_filter(fh, H_TECH_COMM,    htc)
+        if hmonth: fh = fh[fh["Month Label"].isin(hmonth)]
 
         if h_start_toggle == "Started (start date before today)":
             fh = fh[fh[H_START_DATE].dt.date < today]
