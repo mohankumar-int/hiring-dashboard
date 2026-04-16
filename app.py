@@ -501,17 +501,24 @@ with refresh_col:
         st.rerun()
     st.markdown("</div>", unsafe_allow_html=True)
 
-# Timestamp banner — reads directly from file modification times
+# Timestamp banner — uses folder file mtime if available, else falls back to cache meta
 def file_mtime(path):
-    return datetime.fromtimestamp(os.path.getmtime(path)).strftime("%d %b %Y, %H:%M") if os.path.exists(path) else "not loaded"
+    return datetime.fromtimestamp(os.path.getmtime(path)).strftime("%d %b %Y, %H:%M") if os.path.exists(path) else None
 
-ts_reqs   = file_mtime(STD_REQS)
-ts_hires  = file_mtime(STD_HIRES)
-ts_actual = file_mtime(STD_ACTUAL)
+meta = load_meta()
+
+def best_ts(path, cache_key):
+    return file_mtime(path) or meta.get(cache_key, "not loaded")
+
+ts_reqs   = best_ts(STD_REQS,   "reqs")
+ts_hires  = best_ts(STD_HIRES,  "hires")
+ts_actual = best_ts(STD_ACTUAL, "actual_hires")
+
 st.markdown(
     f"<div class='ts-banner'>"
-    f"Open Reqs: <strong>{ts_reqs}</strong> &nbsp;|&nbsp; "
-    f"Expected Hires: <strong>{ts_hires}</strong> &nbsp;|&nbsp; "
+    f"📁 <strong>Data last loaded</strong> &nbsp;|&nbsp; "
+    f"Open Reqs: <strong>{ts_reqs}</strong> &nbsp;·&nbsp; "
+    f"Expected Hires: <strong>{ts_hires}</strong> &nbsp;·&nbsp; "
     f"Actual Hires YTD: <strong>{ts_actual}</strong>"
     f"</div>",
     unsafe_allow_html=True,
