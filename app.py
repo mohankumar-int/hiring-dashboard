@@ -28,11 +28,24 @@ BORDER  = "#D1D9E0"
 CACHE_DIR = os.path.expanduser("~/.hiring_dashboard")
 os.makedirs(CACHE_DIR, exist_ok=True)
 
-# ── Standard file paths (drop files here — no upload needed) ──────────────────
+# ── Standard file paths ───────────────────────────────────────────────────────
+# Look in both the live server folder AND the Downloads project folder.
+# The newer file wins — so you can drop updated files in either location.
 APP_DIR        = os.path.dirname(os.path.abspath(__file__))
-STD_REQS       = os.path.join(APP_DIR, "open_reqs.xlsx")
-STD_HIRES      = os.path.join(APP_DIR, "expected_hires.xlsx")
-STD_ACTUAL     = os.path.join(APP_DIR, "actual_hires.xlsx")
+DOWNLOADS_DIR  = os.path.expanduser("~/Downloads/hiring_dashboard")
+
+def _newest(filename):
+    """Return the path with the most recent mtime among candidate locations."""
+    candidates = [
+        os.path.join(APP_DIR,       filename),
+        os.path.join(DOWNLOADS_DIR, filename),
+    ]
+    existing = [p for p in candidates if os.path.exists(p)]
+    return max(existing, key=os.path.getmtime) if existing else candidates[0]
+
+STD_REQS   = _newest("open_reqs.xlsx")
+STD_HIRES  = _newest("expected_hires.xlsx")
+STD_ACTUAL = _newest("actual_hires.xlsx")
 
 def load_from_folder(path: str, cache_key: str):
     """Load a standard-named file from the app folder and sync it to cache."""
