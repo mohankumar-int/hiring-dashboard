@@ -28,6 +28,22 @@ BORDER  = "#D1D9E0"
 CACHE_DIR = os.path.expanduser("~/.hiring_dashboard")
 os.makedirs(CACHE_DIR, exist_ok=True)
 
+# ── Standard file paths (drop files here — no upload needed) ──────────────────
+APP_DIR        = os.path.dirname(os.path.abspath(__file__))
+STD_REQS       = os.path.join(APP_DIR, "open_reqs.xlsx")
+STD_HIRES      = os.path.join(APP_DIR, "expected_hires.xlsx")
+STD_ACTUAL     = os.path.join(APP_DIR, "actual_hires.xlsx")
+
+def load_from_folder(path: str, cache_key: str):
+    """Load a standard-named file from the app folder and sync it to cache."""
+    if not os.path.exists(path):
+        return None
+    with open(path, "rb") as f:
+        data = f.read()
+    # Sync to cache so timestamp banner stays accurate
+    save_to_cache(cache_key, data)
+    return data
+
 def _meta_path():
     return os.path.join(CACHE_DIR, "meta.json")
 
@@ -431,60 +447,67 @@ def chart_base():
 # ── Sidebar ───────────────────────────────────────────────────────────────────
 with st.sidebar:
     st.markdown(f"<h3 style='color:{BLUE};margin-top:0'>Data Sources</h3>", unsafe_allow_html=True)
-    st.caption("Upload fresh files to refresh the dashboard. Previous data loads automatically on restart.")
-    st.markdown("---")
+    st.caption("Drop files into the dashboard folder, then click Refresh to update.")
 
-    open_reqs_upload     = st.file_uploader("Open Hiring Requisitions (.xlsx)", type=["xlsx"], key="up_reqs")
-    expected_hire_upload = st.file_uploader("Expected Hires (.xlsx)",           type=["xlsx"], key="up_hires")
-    actual_hire_upload   = st.file_uploader("Actual Hires YTD (.xlsx)",         type=["xlsx"], key="up_actual")
+    # ── File status indicators ────────────────────────────────────────────────
+    for label, path in [("open_reqs.xlsx", STD_REQS), ("expected_hires.xlsx", STD_HIRES), ("actual_hires.xlsx", STD_ACTUAL)]:
+        if os.path.exists(path):
+            mtime = datetime.fromtimestamp(os.path.getmtime(path)).strftime("%d %b %Y, %H:%M")
+            st.markdown(f"✅ **{label}**  \n<small style='color:#888'>{mtime}</small>", unsafe_allow_html=True)
+        else:
+            st.markdown(f"⬜ **{label}**  \n<small style='color:#cc0000'>not found</small>", unsafe_allow_html=True)
+
+    st.markdown("---")
+    st.caption("After dropping new files into the dashboard folder, click Refresh to reload all data.")
+    if st.button("🔄 Refresh Dashboard", use_container_width=True, type="primary", key="sidebar_refresh"):
+        st.cache_data.clear()
+        for key in ["reqs_bytes", "hires_bytes", "actual_hires_bytes"]:
+            st.session_state.pop(key, None)
+        st.rerun()
 
     st.markdown("---")
     st.markdown(f"<small style='color:#888'>Intuit Talent Acquisition · FY26</small>", unsafe_allow_html=True)
 
-# ── Handle uploads & cache ────────────────────────────────────────────────────
-if open_reqs_upload:
-    raw = open_reqs_upload.read()
-    save_to_cache("reqs", raw)
-    st.session_state["reqs_bytes"] = raw
-
-if expected_hire_upload:
-    raw = expected_hire_upload.read()
-    save_to_cache("hires", raw)
-    st.session_state["hires_bytes"] = raw
-
-if actual_hire_upload:
-    raw = actual_hire_upload.read()
-    save_to_cache("actual_hires", raw)
-    st.session_state["actual_hires_bytes"] = raw
-
-# On first load, pull from disk cache if session is empty
+# On first load: try standard folder files first, then fall back to cache
 if "reqs_bytes" not in st.session_state:
-    cached = load_from_cache("reqs")
-    if cached:
-        st.session_state["reqs_bytes"] = cached
+    data = load_from_folder(STD_REQS, "reqs") or load_from_cache("reqs")
+    if data:
+        st.session_state["reqs_bytes"] = data
 
 if "hires_bytes" not in st.session_state:
-    cached = load_from_cache("hires")
-    if cached:
-        st.session_state["hires_bytes"] = cached
+    data = load_from_folder(STD_HIRES, "hires") or load_from_cache("hires")
+    if data:
+        st.session_state["hires_bytes"] = data
 
 if "actual_hires_bytes" not in st.session_state:
-    cached = load_from_cache("actual_hires")
-    if cached:
-        st.session_state["actual_hires_bytes"] = cached
+    data = load_from_folder(STD_ACTUAL, "actual_hires") or load_from_cache("actual_hires")
+    if data:
+        st.session_state["actual_hires_bytes"] = data
 
 reqs_bytes         = st.session_state.get("reqs_bytes")
 hires_bytes        = st.session_state.get("hires_bytes")
 actual_hires_bytes = st.session_state.get("actual_hires_bytes")
 
 # ── Header ────────────────────────────────────────────────────────────────────
-st.markdown("<h1>Intuit Hiring Dashboard</h1>", unsafe_allow_html=True)
+hdr_col, refresh_col = st.columns([5, 1])
+with hdr_col:
+    st.markdown("<h1 style='margin-bottom:0'>Intuit Hiring Dashboard</h1>", unsafe_allow_html=True)
+with refresh_col:
+    st.markdown("<div style='padding-top:18px'>", unsafe_allow_html=True)
+    if st.button("🔄 Refresh Data", use_container_width=True, type="primary", key="header_refresh"):
+        st.cache_data.clear()
+        for key in ["reqs_bytes", "hires_bytes", "actual_hires_bytes"]:
+            st.session_state.pop(key, None)
+        st.rerun()
+    st.markdown("</div>", unsafe_allow_html=True)
 
-# Timestamp banner
-meta = load_meta()
-ts_reqs   = meta.get("reqs",         "not loaded")
-ts_hires  = meta.get("hires",        "not loaded")
-ts_actual = meta.get("actual_hires", "not loaded")
+# Timestamp banner — reads directly from file modification times
+def file_mtime(path):
+    return datetime.fromtimestamp(os.path.getmtime(path)).strftime("%d %b %Y, %H:%M") if os.path.exists(path) else "not loaded"
+
+ts_reqs   = file_mtime(STD_REQS)
+ts_hires  = file_mtime(STD_HIRES)
+ts_actual = file_mtime(STD_ACTUAL)
 st.markdown(
     f"<div class='ts-banner'>"
     f"Open Reqs: <strong>{ts_reqs}</strong> &nbsp;|&nbsp; "
@@ -495,7 +518,7 @@ st.markdown(
 )
 
 if not reqs_bytes and not hires_bytes and not actual_hires_bytes:
-    st.info("Upload one or more data files in the sidebar to get started.")
+    st.info("No data loaded yet. Drop **open_reqs.xlsx**, **expected_hires.xlsx**, and **actual_hires.xlsx** into the dashboard folder — or upload via the sidebar buttons.")
     st.stop()
 
 df_reqs         = load_open_reqs(reqs_bytes)             if reqs_bytes         else None
