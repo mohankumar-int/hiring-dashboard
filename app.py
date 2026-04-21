@@ -469,21 +469,26 @@ with st.sidebar:
     st.markdown("---")
     st.markdown(f"<small style='color:#888'>Intuit Talent Acquisition · FY26</small>", unsafe_allow_html=True)
 
-# On first load: try standard folder files first, then fall back to cache
-if "reqs_bytes" not in st.session_state:
-    data = load_from_folder(STD_REQS, "reqs") or load_from_cache("reqs")
-    if data:
-        st.session_state["reqs_bytes"] = data
+# Load data — always re-read from disk if the file is newer than what's in session
+def _file_mtime_ts(path):
+    """Return file mtime as a float, or 0 if file doesn't exist."""
+    return os.path.getmtime(path) if os.path.exists(path) else 0
 
-if "hires_bytes" not in st.session_state:
-    data = load_from_folder(STD_HIRES, "hires") or load_from_cache("hires")
-    if data:
-        st.session_state["hires_bytes"] = data
+for _sess_key, _path, _cache_key in [
+    ("reqs_bytes",         STD_REQS,   "reqs"),
+    ("hires_bytes",        STD_HIRES,  "hires"),
+    ("actual_hires_bytes", STD_ACTUAL, "actual_hires"),
+]:
+    _file_ts   = _file_mtime_ts(_path)
+    _loaded_ts = st.session_state.get(f"{_sess_key}_mtime", 0)
 
-if "actual_hires_bytes" not in st.session_state:
-    data = load_from_folder(STD_ACTUAL, "actual_hires") or load_from_cache("actual_hires")
-    if data:
-        st.session_state["actual_hires_bytes"] = data
+    if _sess_key not in st.session_state or _file_ts > _loaded_ts:
+        # File is new or has been updated — reload it
+        data = load_from_folder(_path, _cache_key) or load_from_cache(_cache_key)
+        if data:
+            st.session_state[_sess_key]              = data
+            st.session_state[f"{_sess_key}_mtime"]   = _file_ts
+            st.cache_data.clear()
 
 reqs_bytes         = st.session_state.get("reqs_bytes")
 hires_bytes        = st.session_state.get("hires_bytes")
