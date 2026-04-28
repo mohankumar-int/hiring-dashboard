@@ -310,9 +310,9 @@ st.markdown(f"""
 
 # ── Column name constants ─────────────────────────────────────────────────────
 R_PIPELINE_ID  = "Pipelines > Pipeline ID"
-R_L2           = "DS - Join Supervisory Organization > Level 02 Organization Name"
-R_L3           = "DS - Join Supervisory Organization > Level 03 Organization Name"
-R_L4           = "DS - Join Supervisory Organization > Level 04 Organization Name"
+R_L2           = "DS - Join Supervisory Organization > LVL 2 Org Name"
+R_L3           = "DS - Join Supervisory Organization > LVL 3 Org Name"
+R_L4           = "DS - Join Supervisory Organization > LVL 4 Org Name"
 R_JOB_LEVEL    = "Pipelines > Job level"
 R_JOB_PROFILE  = "Pipelines > Job profile name"
 R_JOB_TITLE    = "Pipelines > Job posting title"
@@ -331,6 +331,25 @@ R_COUNTRY      = "Pipelines > Location country"
 R_DAYS_OPEN    = "Days Open"
 R_JOB_FAM_GRP  = "Pipelines > Job family group"
 R_WORKER_TYPE  = "Pipelines > Worker Type Classification - Employee Type"
+
+def _resolve_col(df: pd.DataFrame, wanted: str) -> str:
+    """Return the actual column name that best matches `wanted`.
+    Tries exact match first, then case-insensitive, then keyword match.
+    Falls back to `wanted` so downstream code surfaces a clean KeyError."""
+    cols = list(df.columns)
+    if wanted in cols:
+        return wanted
+    # Case-insensitive exact
+    low = wanted.lower()
+    for c in cols:
+        if c.lower() == low:
+            return c
+    # Keyword: last word of wanted (e.g. "LVL 2 Org Name" → "2")
+    keywords = [w for w in wanted.lower().split() if len(w) > 1]
+    for c in cols:
+        if all(k in c.lower() for k in keywords):
+            return c
+    return wanted  # let it fail with a readable KeyError
 
 H_PIPELINE_ID  = "Avature Pipeline ID"
 H_L2           = "Org Level 2"
@@ -387,6 +406,15 @@ A_FISCAL_YEAR  = "Fiscal Year"
 def load_open_reqs(raw: bytes) -> pd.DataFrame:
     df = pd.read_excel(raw)
     df.columns = [c.strip() for c in df.columns]
+    # Normalise column names to the constants we expect,
+    # so minor export-format changes don't break the dashboard.
+    rename = {}
+    for const in [R_L2, R_L3, R_L4]:
+        actual = _resolve_col(df, const)
+        if actual != const:
+            rename[actual] = const
+    if rename:
+        df = df.rename(columns=rename)
     return df
 
 @st.cache_data(show_spinner=False)
