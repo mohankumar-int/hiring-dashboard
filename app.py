@@ -334,22 +334,28 @@ R_WORKER_TYPE  = "Pipelines > Worker Type Classification - Employee Type"
 
 def _resolve_col(df: pd.DataFrame, wanted: str) -> str:
     """Return the actual column name that best matches `wanted`.
-    Tries exact match first, then case-insensitive, then keyword match.
+    Tries exact match first, then case-insensitive exact.
     Falls back to `wanted` so downstream code surfaces a clean KeyError."""
     cols = list(df.columns)
     if wanted in cols:
         return wanted
-    # Case-insensitive exact
     low = wanted.lower()
     for c in cols:
         if c.lower() == low:
             return c
-    # Keyword: last word of wanted (e.g. "LVL 2 Org Name" → "2")
-    keywords = [w for w in wanted.lower().split() if len(w) > 1]
-    for c in cols:
-        if all(k in c.lower() for k in keywords):
+    return wanted
+
+def _find_org_col(df: pd.DataFrame, level: int) -> str:
+    """Find the L2/L3/L4 org column regardless of how Workday exported it.
+    Matches patterns like 'Level 02', 'LVL 2', 'L2', 'level 2' etc."""
+    import re
+    pattern = re.compile(
+        rf"(level\s*0?{level}|lvl\s*0?{level})\b", re.IGNORECASE
+    )
+    for c in df.columns:
+        if pattern.search(c):
             return c
-    return wanted  # let it fail with a readable KeyError
+    return None
 
 H_PIPELINE_ID  = "Avature Pipeline ID"
 H_L2           = "Org Level 2"
@@ -406,13 +412,13 @@ A_FISCAL_YEAR  = "Fiscal Year"
 def load_open_reqs(raw: bytes) -> pd.DataFrame:
     df = pd.read_excel(raw)
     df.columns = [c.strip() for c in df.columns]
-    # Normalise column names to the constants we expect,
-    # so minor export-format changes don't break the dashboard.
+    # Detect L2/L3/L4 org columns regardless of Workday export format
+    # (handles "Level 02 Organization Name", "LVL 2 Org Name", etc.)
     rename = {}
-    for const in [R_L2, R_L3, R_L4]:
-        actual = _resolve_col(df, const)
-        if actual != const:
-            rename[actual] = const
+    for level, const in [(2, R_L2), (3, R_L3), (4, R_L4)]:
+        found = _find_org_col(df, level)
+        if found and found != const:
+            rename[found] = const
     if rename:
         df = df.rename(columns=rename)
     return df
