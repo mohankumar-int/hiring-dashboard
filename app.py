@@ -472,23 +472,35 @@ def simple_summary(df, group_col, val_col="count") -> pd.DataFrame:
 _ALL = "✅ Select All"
 
 def ms_with_all(label: str, options: list, key: str, default=None) -> list:
-    """Multiselect where '✅ Select All' is the first option.
-    - Clicking Select All fills all real options instantly.
-    - You can then deselect individual items you don't need.
-    - Empty selection = no filter applied (show everything).
+    """Multiselect where '✅ Select All' is the first item in the list.
+    Uses a shadow key (_val) to track selections so we can pre-populate
+    all options on Select All without hitting Streamlit's widget-key lock.
+
+    Workflow:
+      1. Open dropdown → pick '✅ Select All' → all real options load (1 click)
+      2. Click any tag to remove it (1 click each)
+      3. Empty = no filter = show everything
     """
-    choices = [_ALL] + list(options)
-    raw = st.multiselect(label, choices, default=default or [], key=key)
+    _val_key = f"__{key}_val"
+    options   = list(options)
+    choices   = [_ALL] + options
+
+    # Initialise shadow value
+    if _val_key not in st.session_state:
+        st.session_state[_val_key] = list(default or [])
+
+    raw = st.multiselect(label, choices,
+                         default=st.session_state[_val_key], key=key)
+
     if _ALL in raw:
-        # If Select All was just chosen, return all real options
-        # and persist full selection into session state
-        full = list(options)
-        if set(raw) != {_ALL} | set(options):
-            # First click on Select All — expand to all real options
-            st.session_state[key] = full
-            st.rerun()
-        return full
-    return [v for v in raw if v != _ALL]
+        # User just clicked Select All — set shadow to all real options
+        # and rerun so the widget re-renders with every option selected
+        st.session_state[_val_key] = options
+        st.rerun()
+
+    # Keep shadow in sync for next render
+    st.session_state[_val_key] = [v for v in raw if v != _ALL]
+    return st.session_state[_val_key]
 
 def chart_base():
     return dict(
