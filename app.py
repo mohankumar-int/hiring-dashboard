@@ -469,14 +469,26 @@ def simple_summary(df, group_col, val_col="count") -> pd.DataFrame:
     total_row = pd.DataFrame({group_col: ["Total"], s.columns[-1]: [s.iloc[:, -1].sum()]})
     return pd.concat([s.sort_values(s.columns[-1], ascending=False), total_row], ignore_index=True)
 
+_ALL = "✅ Select All"
+
 def ms_with_all(label: str, options: list, key: str, default=None) -> list:
-    """Multiselect with a 'Select All' checkbox above it.
-    Returns selected values (empty list = no filter = show all)."""
-    all_key = f"{key}_all"
-    select_all = st.checkbox(f"Select all {label}", key=all_key, value=False)
-    if select_all:
-        return options
-    return st.multiselect(label, options, default=default or [], key=key)
+    """Multiselect where '✅ Select All' is the first option.
+    - Clicking Select All fills all real options instantly.
+    - You can then deselect individual items you don't need.
+    - Empty selection = no filter applied (show everything).
+    """
+    choices = [_ALL] + list(options)
+    raw = st.multiselect(label, choices, default=default or [], key=key)
+    if _ALL in raw:
+        # If Select All was just chosen, return all real options
+        # and persist full selection into session state
+        full = list(options)
+        if set(raw) != {_ALL} | set(options):
+            # First click on Select All — expand to all real options
+            st.session_state[key] = full
+            st.rerun()
+        return full
+    return [v for v in raw if v != _ALL]
 
 def chart_base():
     return dict(
