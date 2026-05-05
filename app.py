@@ -844,14 +844,15 @@ with tab1:
                         line=dict(color="#FF6900"),
                     )
 
-        fig_heat.update_layout(
-            **chart_base(),
+        _heat_layout = chart_base()
+        _heat_layout.update(dict(
             height=max(280, len(_l3_rows) * 36 + 80),
             margin=dict(t=20, b=20, l=10, r=10),
             xaxis=dict(side="top", tickfont=dict(size=11, color="#1C2B3A")),
             yaxis=dict(tickfont=dict(size=11, color="#1C2B3A"), autorange="reversed"),
             clickmode="event",
-        )
+        ))
+        fig_heat.update_layout(**_heat_layout)
         hm_event = st.plotly_chart(
             fig_heat, use_container_width=True,
             key="xf_heatmap", on_select="rerun",
