@@ -472,35 +472,42 @@ def simple_summary(df, group_col, val_col="count") -> pd.DataFrame:
 _ALL = "✅ Select All"
 
 def ms_with_all(label: str, options: list, key: str, default=None) -> list:
-    """Multiselect where '✅ Select All' is the first item in the list.
-    Uses a shadow key (_val) to track selections so we can pre-populate
-    all options on Select All without hitting Streamlit's widget-key lock.
+    """Multiselect with Select All support.
+
+    Works by keeping all state in a shadow key (never binding the widget
+    key directly to session_state, so we can freely update it before render).
 
     Workflow:
-      1. Open dropdown → pick '✅ Select All' → all real options load (1 click)
-      2. Click any tag to remove it (1 click each)
+      1. Open dropdown → pick '✅ Select All' → all options appear selected
+      2. Click any tag (blue pill) to remove it
       3. Empty = no filter = show everything
     """
-    _val_key = f"__{key}_val"
-    options   = list(options)
-    choices   = [_ALL] + options
+    shadow   = f"__{key}_val"
+    options  = list(options)
+    choices  = [_ALL] + options
 
-    # Initialise shadow value
-    if _val_key not in st.session_state:
-        st.session_state[_val_key] = list(default or [])
+    # Initialise shadow on first render
+    if shadow not in st.session_state:
+        st.session_state[shadow] = list(default or [])
 
-    raw = st.multiselect(label, choices,
-                         default=st.session_state[_val_key], key=key)
+    # If Select All was triggered last run, shadow already holds all options.
+    # Render the widget with shadow as the current value (no widget key —
+    # we manage state entirely through the shadow).
+    current  = st.session_state[shadow]
+    selected = st.multiselect(label, choices, default=current, key=key)
 
-    if _ALL in raw:
-        # User just clicked Select All — set shadow to all real options
-        # and rerun so the widget re-renders with every option selected
-        st.session_state[_val_key] = options
+    if _ALL in selected:
+        # Store all real options in shadow, delete the widget key so
+        # Streamlit re-initialises it from `default` on next render
+        st.session_state[shadow] = options
+        if key in st.session_state:
+            del st.session_state[key]
         st.rerun()
 
-    # Keep shadow in sync for next render
-    st.session_state[_val_key] = [v for v in raw if v != _ALL]
-    return st.session_state[_val_key]
+    # Normal interaction — sync shadow
+    cleaned = [v for v in selected if v != _ALL]
+    st.session_state[shadow] = cleaned
+    return cleaned
 
 def chart_base():
     return dict(
