@@ -797,7 +797,7 @@ with tab1:
             st.dataframe(jl_offer_piv, use_container_width=True)
         with tc2:
             chart_src = (
-                fx.groupby([R_JOB_LEVEL, "Has Expected Offer"])[R_REMAINING]
+                f.groupby([R_JOB_LEVEL, "Has Expected Offer"])[R_REMAINING]
                 .sum().reset_index()
                 .rename(columns={R_JOB_LEVEL: "Job Level", R_REMAINING: "Openings", "Has Expected Offer": "Offer"})
             )
@@ -823,11 +823,11 @@ with tab1:
             horizontal=True, key="jfg_jl_toggle",
         )
         if jfg_view == "Has Offer":
-            jfg_src = fx[fx["Has Expected Offer"] == "Yes"]
+            jfg_src = f[f["Has Expected Offer"] == "Yes"]
         elif jfg_view == "No Offer":
-            jfg_src = fx[fx["Has Expected Offer"] == "No"]
+            jfg_src = f[f["Has Expected Offer"] == "No"]
         else:
-            jfg_src = fx
+            jfg_src = f
 
         if R_JOB_FAM_GRP in jfg_src.columns:
             jfg_jl_piv = pivot_with_totals(jfg_src, R_JOB_FAM_GRP, R_JOB_LEVEL, R_REMAINING)
@@ -841,7 +841,7 @@ with tab1:
         # ── Table 5: Priority breakdown ──────────────────────────────────────
         st.markdown("<p class='section-label'>Remaining Openings by Priority Level</p>", unsafe_allow_html=True)
         pri_tbl = (
-            fx.dropna(subset=[R_PRIORITY])
+            f.dropna(subset=[R_PRIORITY])
             .groupby(R_PRIORITY)[R_REMAINING].sum()
             .reset_index().rename(columns={R_PRIORITY: "Priority", R_REMAINING: "Remaining Openings"})
             .sort_values("Priority")
