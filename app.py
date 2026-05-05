@@ -765,26 +765,8 @@ with tab1:
 
         st.markdown("---")
 
-        # ── Table 2: L3 Org × Job Level — clickable cross-filter heatmap ───────
+        # ── Table 2: L3 Org × Job Level ──────────────────────────────────────
         st.markdown("<p class='section-label'>Remaining Openings by L3 Org × Job Level</p>", unsafe_allow_html=True)
-
-        xf_sel = get_xfilter("tab1")
-        if xf_sel:
-            sel_l3s = sorted({l3 for l3, _ in xf_sel})
-            sel_jls = sorted({jl for _, jl in xf_sel})
-            st.markdown(
-                f"<div style='background:#FFF3CD;border-left:4px solid #FF6900;"
-                f"border-radius:4px;padding:8px 14px;margin-bottom:8px;font-size:0.85rem;color:#1C2B3A'>"
-                f"🔍 <strong>Cross-filter active</strong> — "
-                f"L3: <strong>{', '.join(sel_l3s)}</strong> &nbsp;·&nbsp; "
-                f"Level: <strong>{', '.join(sel_jls)}</strong> &nbsp;·&nbsp; "
-                f"<em>Click a cell again to deselect, or clear all below</em></div>",
-                unsafe_allow_html=True,
-            )
-            if st.button("✖ Clear cross-filter", key="xf_clear_tab1"):
-                st.session_state[_xf_key("tab1")] = []
-                st.rerun()
-
         l3_view = st.radio(
             "Show openings:",
             ["Total", "With Offer", "Without Offer"],
@@ -796,101 +778,16 @@ with tab1:
             l3_src = f[f["Has Expected Offer"] == "No"]
         else:
             l3_src = f
-
-        # Build pivot for heatmap (exclude Grand Total row for clicking)
-        _piv_raw = l3_src.pivot_table(
-            index=R_L3, columns=R_JOB_LEVEL, values=R_REMAINING,
-            aggfunc="sum", fill_value=0
-        )
-        _piv_raw = _piv_raw.reindex(sorted(_piv_raw.columns), axis=1)
-        _piv_raw["Total"] = _piv_raw.sum(axis=1)
-        _piv_raw = _piv_raw.sort_values("Total", ascending=False)
-
-        _jl_cols  = [c for c in _piv_raw.columns if c != "Total"]
-        _l3_rows  = list(_piv_raw.index)
-        _z        = _piv_raw[_jl_cols].values.tolist()
-        _text     = [[str(int(v)) if v else "" for v in row] for row in _z]
-
-        # Highlight selected cells
-        _sel_set  = set(xf_sel)
-        _colors   = [
-            ["#0077C5" if (_l3_rows[r], _jl_cols[c]) in _sel_set else
-             ("#E8F0F8" if _z[r][c] > 0 else "#F7F9FB")
-             for c in range(len(_jl_cols))]
-            for r in range(len(_l3_rows))
-        ]
-        _font_col = [
-            ["#FFFFFF" if (_l3_rows[r], _jl_cols[c]) in _sel_set else "#1C2B3A"
-             for c in range(len(_jl_cols))]
-            for r in range(len(_l3_rows))
-        ]
-
-        fig_heat = go.Figure(go.Heatmap(
-            z=_z, x=_jl_cols, y=_l3_rows,
-            text=_text, texttemplate="%{text}",
-            colorscale=[[0, "#F7F9FB"], [1, "#0077C5"]],
-            showscale=False,
-            hovertemplate="<b>%{y}</b><br>%{x}: %{z}<extra></extra>",
-        ))
-        # Overlay coloured cells via shapes + annotations for selected
-        for r, l3 in enumerate(_l3_rows):
-            for c, jl in enumerate(_jl_cols):
-                if (l3, jl) in _sel_set:
-                    fig_heat.add_shape(
-                        type="rect",
-                        x0=c - 0.5, x1=c + 0.5,
-                        y0=r - 0.5, y1=r + 0.5,
-                        fillcolor="#FF6900", opacity=0.85,
-                        line=dict(color="#FF6900"),
-                    )
-
-        _heat_layout = chart_base()
-        _heat_layout.update(dict(
-            height=max(280, len(_l3_rows) * 36 + 80),
-            margin=dict(t=20, b=20, l=10, r=10),
-            xaxis=dict(side="top", tickfont=dict(size=11, color="#1C2B3A")),
-            yaxis=dict(tickfont=dict(size=11, color="#1C2B3A"), autorange="reversed"),
-            clickmode="event",
-        ))
-        fig_heat.update_layout(**_heat_layout)
-        hm_event = st.plotly_chart(
-            fig_heat, use_container_width=True,
-            key="xf_heatmap", on_select="rerun",
-        )
-
-        # Handle click — toggle selection
-        if hm_event and hm_event.get("selection", {}).get("points"):
-            for pt in hm_event["selection"]["points"]:
-                clicked_jl = pt.get("x")
-                clicked_l3 = pt.get("y")
-                if clicked_l3 and clicked_jl and clicked_jl in _jl_cols:
-                    toggle_xfilter("tab1", clicked_l3, clicked_jl)
-                    # Sync L3 and Job Level dropdowns
-                    new_l3s = sorted({l3 for l3, _ in get_xfilter("tab1")})
-                    new_jls = sorted({jl for _, jl in get_xfilter("tab1")})
-                    st.session_state["r_l3"]     = new_l3s
-                    st.session_state["__r_l3_val"] = new_l3s
-                    st.session_state["r_jl"]     = new_jls
-                    st.session_state["__r_jl_val"] = new_jls
-                    st.rerun()
-
-        # Also show numeric table with totals below heatmap
-        grand_row = _piv_raw.sum()
-        grand_row.name = "Grand Total"
-        _piv_display = pd.concat([_piv_raw, grand_row.to_frame().T])
-        _piv_display.index.name = "L3 Org"
-        st.dataframe(_piv_display, use_container_width=True)
+        l3_jl_piv = pivot_with_totals(l3_src, R_L3, R_JOB_LEVEL, R_REMAINING)
+        l3_jl_piv.index.name = "L3 Org"
+        st.dataframe(l3_jl_piv, use_container_width=True)
 
         st.markdown("---")
 
-        # ── Cross-filtered data for all tables below ──────────────────────────
-        # fx = f filtered by clicked L3 × Job Level intersections
-        fx = apply_xfilter(f, "tab1", R_L3, R_JOB_LEVEL)
-
-        # ── Table 3: Job Level × Has Expected Offer (replaces chart) ─────────
+        # ── Table 3: Job Level × Has Expected Offer ───────────────────────────
         st.markdown("<p class='section-label'>Remaining Openings by Job Level — Offer Status</p>", unsafe_allow_html=True)
 
-        jl_offer_piv = pivot_with_totals(fx, R_JOB_LEVEL, "Has Expected Offer", R_REMAINING)
+        jl_offer_piv = pivot_with_totals(f, R_JOB_LEVEL, "Has Expected Offer", R_REMAINING)
         jl_offer_piv.index.name = "Job Level"
         # Rename columns for clarity
         jl_offer_piv = jl_offer_piv.rename(columns={"No": "No Offer", "Yes": "Has Offer"})
@@ -958,9 +855,7 @@ with tab1:
         st.markdown("---")
 
         # ── Main detail table ─────────────────────────────────────────────────
-        xf_label = f" · filtered to {len(fx):,} rows by cross-filter" if xf_sel else ""
         st.markdown("<p class='section-label'>All Open Requisitions</p>", unsafe_allow_html=True)
-        st.caption(f"Sorted: L3 Org → L4 Org → Job Level  ·  {len(fx):,} rows{xf_label}")
 
         col_map = {
             R_PIPELINE_ID:  "Pipeline ID",
@@ -987,11 +882,42 @@ with tab1:
             "Has Expected Offer": "Has Offer?",
         }
         tbl = (
-            fx[[c for c in col_map if c in fx.columns]]
+            f[[c for c in col_map if c in f.columns]]
             .rename(columns=col_map)
             .sort_values(["L3 Org", "L4 Org", "Job Level"])
             .reset_index(drop=True)
         )
+
+        # ── Column search filters (like Excel/Gsheet) ─────────────────────────
+        # Show filter inputs for the most useful text columns
+        with st.expander("🔍 Column filters — type to narrow the table", expanded=False):
+            fc1, fc2, fc3, fc4, fc5 = st.columns(5)
+            tf_l3   = fc1.text_input("L3 Org",       key="tf_l3",  placeholder="search…")
+            tf_l4   = fc2.text_input("L4 Org",       key="tf_l4",  placeholder="search…")
+            tf_jl   = fc3.text_input("Job Level",    key="tf_jl",  placeholder="search…")
+            tf_jt   = fc4.text_input("Job Title",    key="tf_jt",  placeholder="search…")
+            tf_rec  = fc5.text_input("Recruiter",    key="tf_rec", placeholder="search…")
+            fc6, fc7, fc8, _, _ = st.columns(5)
+            tf_tam  = fc6.text_input("TAM",          key="tf_tam", placeholder="search…")
+            tf_step = fc7.text_input("Current Step", key="tf_step",placeholder="search…")
+            tf_pri  = fc8.text_input("Priority",     key="tf_pri", placeholder="search…")
+
+        # Apply column search filters (case-insensitive contains)
+        ftbl = tbl.copy()
+        for val, col in [
+            (tf_l3,   "L3 Org"),
+            (tf_l4,   "L4 Org"),
+            (tf_jl,   "Job Level"),
+            (tf_jt,   "Job Title"),
+            (tf_rec,  "Recruiter"),
+            (tf_tam,  "TAM"),
+            (tf_step, "Current Step"),
+            (tf_pri,  "Priority"),
+        ]:
+            if val and col in ftbl.columns:
+                ftbl = ftbl[ftbl[col].astype(str).str.contains(val, case=False, na=False)]
+
+        st.caption(f"{len(ftbl):,} of {len(tbl):,} rows shown · Sorted: L3 Org → L4 Org → Job Level")
 
         def row_style(row):
             if row.get("Has Offer?") == "Yes":
@@ -999,12 +925,12 @@ with tab1:
             return [""] * len(row)
 
         st.dataframe(
-            tbl.style.apply(row_style, axis=1),
+            ftbl.style.apply(row_style, axis=1),
             use_container_width=True, height=500,
         )
         st.download_button(
             "Download Filtered Data (CSV)",
-            tbl.to_csv(index=False).encode("utf-8"),
+            ftbl.to_csv(index=False).encode("utf-8"),
             "open_reqs_filtered.csv", "text/csv",
         )
 
