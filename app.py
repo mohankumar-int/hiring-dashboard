@@ -469,6 +469,15 @@ def simple_summary(df, group_col, val_col="count") -> pd.DataFrame:
     total_row = pd.DataFrame({group_col: ["Total"], s.columns[-1]: [s.iloc[:, -1].sum()]})
     return pd.concat([s.sort_values(s.columns[-1], ascending=False), total_row], ignore_index=True)
 
+def ms_with_all(label: str, options: list, key: str, default=None) -> list:
+    """Multiselect with a 'Select All' checkbox above it.
+    Returns selected values (empty list = no filter = show all)."""
+    all_key = f"{key}_all"
+    select_all = st.checkbox(f"Select all {label}", key=all_key, value=False)
+    if select_all:
+        return options
+    return st.multiselect(label, options, default=default or [], key=key)
+
 def chart_base():
     return dict(
         plot_bgcolor=WHITE,
@@ -602,51 +611,50 @@ with tab1:
         with fr1a:
             wt_opts = clean_options(df_reqs[R_WORKER_TYPE])
             wt_default = ["Employee"] if "Employee" in wt_opts else []
-            wt_filter = st.multiselect("Employee Type", wt_opts,
-                                       default=wt_default, key="r_wt")
+            wt_filter = ms_with_all("Employee Type", wt_opts, key="r_wt", default=wt_default)
         with fr1b:
-            l2_filter = st.multiselect("Level 2 Org", clean_options(df_reqs[R_L2]), key="r_l2")
+            l2_filter = ms_with_all("Level 2 Org", clean_options(df_reqs[R_L2]), key="r_l2")
         with fr1c:
-            l3_filter = st.multiselect("Level 3 Org", clean_options(df_reqs[R_L3]), key="r_l3")
+            l3_filter = ms_with_all("Level 3 Org", clean_options(df_reqs[R_L3]), key="r_l3")
         with fr1d:
-            l4_filter = st.multiselect("Level 4 Org", clean_options(df_reqs[R_L4]), key="r_l4")
+            l4_filter = ms_with_all("Level 4 Org", clean_options(df_reqs[R_L4]), key="r_l4")
 
         # Row 2 — Job dimensions
         fr2a, fr2b, fr2c, fr2d = st.columns(4)
         with fr2a:
-            jfg_filter = st.multiselect("Job Family Group", clean_options(df_reqs[R_JOB_FAM_GRP]), key="r_jfg")
+            jfg_filter = ms_with_all("Job Family Group", clean_options(df_reqs[R_JOB_FAM_GRP]), key="r_jfg")
         with fr2b:
-            jf_filter  = st.multiselect("Job Family",       clean_options(df_reqs[R_JOB_FAMILY]),  key="r_jf")
+            jf_filter  = ms_with_all("Job Family",       clean_options(df_reqs[R_JOB_FAMILY]),  key="r_jf")
         with fr2c:
-            jl_filter  = st.multiselect("Job Level",        clean_options(df_reqs[R_JOB_LEVEL]),   key="r_jl")
+            jl_filter  = ms_with_all("Job Level",        clean_options(df_reqs[R_JOB_LEVEL]),   key="r_jl")
         with fr2d:
-            jp_filter  = st.multiselect("Job Profile",      clean_options(df_reqs[R_JOB_PROFILE]), key="r_jp")
+            jp_filter  = ms_with_all("Job Profile",      clean_options(df_reqs[R_JOB_PROFILE]), key="r_jp")
 
         # Row 3 — People & Priority
         fr3a, fr3b, fr3c, fr3d = st.columns(4)
         with fr3a:
-            tam_filter  = st.multiselect("TAM",       clean_options(df_reqs[R_TAM]),          key="r_tam")
+            tam_filter    = ms_with_all("TAM",               clean_options(df_reqs[R_TAM]),               key="r_tam")
         with fr3b:
-            rec_filter  = st.multiselect("Recruiter", clean_options(df_reqs[R_RECRUITER]),    key="r_rec")
+            rec_filter    = ms_with_all("Recruiter",         clean_options(df_reqs[R_RECRUITER]),         key="r_rec")
         with fr3c:
-            pri_filter  = st.multiselect("Priority Level",    clean_options(df_reqs[R_PRIORITY]),    key="r_pri")
+            pri_filter    = ms_with_all("Priority Level",    clean_options(df_reqs[R_PRIORITY]),          key="r_pri")
         with fr3d:
-            pricat_filter = st.multiselect("Priority Category", clean_options(df_reqs[R_PRIORITY_CAT]), key="r_pricat")
+            pricat_filter = ms_with_all("Priority Category", clean_options(df_reqs[R_PRIORITY_CAT]),      key="r_pricat")
 
         # Row 4 — Step, FY, Offer toggle, Pipeline IDs
         fr4a, fr4b, fr4c, fr4d = st.columns(4)
         with fr4a:
-            step_filter = st.multiselect("Pipeline Step", clean_options(df_reqs[R_STEP]), key="r_step")
+            step_filter = ms_with_all("Pipeline Step", clean_options(df_reqs[R_STEP]),       key="r_step")
         with fr4b:
-            fy_filter   = st.multiselect("Target FY",    clean_options(df_reqs[R_TARGET_FY]), key="r_fy")
+            fy_filter   = ms_with_all("Target FY",    clean_options(df_reqs[R_TARGET_FY]),   key="r_fy")
         with fr4c:
             offer_toggle = st.selectbox(
                 "Has Expected Offer?", ["All", "Yes — has offer", "No — no offer"], key="r_offer"
             )
         with fr4d:
             if df_hires is not None and offer_toggle != "No — no offer":
-                pid_filter = st.multiselect(
-                    "Specific Pipeline IDs (Expected Hires)",
+                pid_filter = ms_with_all(
+                    "Specific Pipeline IDs",
                     sorted(pipeline_ids_with_offers), key="r_pid",
                 )
             else:
@@ -757,7 +765,31 @@ with tab1:
 
         st.markdown("---")
 
-        # ── Table 4: Priority breakdown ───────────────────────────────────────
+        # ── Table 4: Job Family Group × Job Level — Offer Status ─────────────
+        st.markdown("<p class='section-label'>Remaining Openings by Job Family Group & Job Level — Offer Status</p>", unsafe_allow_html=True)
+
+        jfg_view = st.radio(
+            "Show openings:",
+            ["Total", "Has Offer", "No Offer"],
+            horizontal=True, key="jfg_jl_toggle",
+        )
+        if jfg_view == "Has Offer":
+            jfg_src = f[f["Has Expected Offer"] == "Yes"]
+        elif jfg_view == "No Offer":
+            jfg_src = f[f["Has Expected Offer"] == "No"]
+        else:
+            jfg_src = f
+
+        if R_JOB_FAM_GRP in jfg_src.columns:
+            jfg_jl_piv = pivot_with_totals(jfg_src, R_JOB_FAM_GRP, R_JOB_LEVEL, R_REMAINING)
+            jfg_jl_piv.index.name = "Job Family Group"
+            st.dataframe(jfg_jl_piv, use_container_width=True)
+        else:
+            st.info("Job Family Group column not found in this data export.")
+
+        st.markdown("---")
+
+        # ── Table 5: Priority breakdown ──────────────────────────────────────
         st.markdown("<p class='section-label'>Remaining Openings by Priority Level</p>", unsafe_allow_html=True)
         pri_tbl = (
             f.dropna(subset=[R_PRIORITY])
@@ -849,42 +881,42 @@ with tab2:
         with hf1a:
             het_opts    = clean_options(df_hires[H_EMP_TYPE]) if H_EMP_TYPE in df_hires.columns else []
             het_default = ["Employee"] if "Employee" in het_opts else []
-            het = st.multiselect("Employee Type", het_opts, default=het_default, key="h_et")
+            het = ms_with_all("Employee Type", het_opts, key="h_et", default=het_default)
         with hf1b:
-            hl2  = st.multiselect("Org Level 2", clean_options(df_hires[H_L2])  if H_L2  in df_hires.columns else [], key="h_l2")
+            hl2  = ms_with_all("Org Level 2", clean_options(df_hires[H_L2])  if H_L2  in df_hires.columns else [], key="h_l2")
         with hf1c:
-            hl3  = st.multiselect("Org Level 3", clean_options(df_hires[H_L3]),  key="h_l3")
+            hl3  = ms_with_all("Org Level 3", clean_options(df_hires[H_L3]),  key="h_l3")
         with hf1d:
-            hl4  = st.multiselect("Org Level 4", clean_options(df_hires[H_L4])  if H_L4  in df_hires.columns else [], key="h_l4")
+            hl4  = ms_with_all("Org Level 4", clean_options(df_hires[H_L4])  if H_L4  in df_hires.columns else [], key="h_l4")
 
         # Row 2 — Job dimensions
         hf2a, hf2b, hf2c, hf2d = st.columns(4)
         with hf2a:
-            hjfg = st.multiselect("Job Family Group", clean_options(df_hires[H_JOB_FAM_GRP]) if H_JOB_FAM_GRP in df_hires.columns else [], key="h_jfg")
+            hjfg = ms_with_all("Job Family Group", clean_options(df_hires[H_JOB_FAM_GRP]) if H_JOB_FAM_GRP in df_hires.columns else [], key="h_jfg")
         with hf2b:
-            hjf  = st.multiselect("Job Family",       clean_options(df_hires[H_JOB_FAMILY]),  key="h_jf")
+            hjf  = ms_with_all("Job Family",       clean_options(df_hires[H_JOB_FAMILY]),  key="h_jf")
         with hf2c:
-            hjl  = st.multiselect("Job Level",        clean_options(df_hires[H_JOB_LEVEL]),   key="h_jl")
+            hjl  = ms_with_all("Job Level",        clean_options(df_hires[H_JOB_LEVEL]),   key="h_jl")
         with hf2d:
-            hht  = st.multiselect("Hire Type",        clean_options(df_hires[H_HIRE_TYPE]),   key="h_ht")
+            hht  = ms_with_all("Hire Type",        clean_options(df_hires[H_HIRE_TYPE]),   key="h_ht")
 
         # Row 3 — People & Priority
         hf3a, hf3b, hf3c, hf3d = st.columns(4)
         with hf3a:
-            htam = st.multiselect("TAM",               clean_options(df_hires[H_TAM]),          key="h_tam")
+            htam = ms_with_all("TAM",               clean_options(df_hires[H_TAM]),                                                              key="h_tam")
         with hf3b:
-            hrec = st.multiselect("Recruiter",         clean_options(df_hires[H_RECRUITER]),    key="h_rec")
+            hrec = ms_with_all("Recruiter",         clean_options(df_hires[H_RECRUITER]),                                                        key="h_rec")
         with hf3c:
-            hpp  = st.multiselect("Priority Level",    clean_options(df_hires[H_PRIORITY]),     key="h_pri")
+            hpp  = ms_with_all("Priority Level",    clean_options(df_hires[H_PRIORITY]),                                                         key="h_pri")
         with hf3d:
-            hppc = st.multiselect("Priority Category", clean_options(df_hires[H_PRIORITY_CAT]) if H_PRIORITY_CAT in df_hires.columns else [], key="h_pricat")
+            hppc = ms_with_all("Priority Category", clean_options(df_hires[H_PRIORITY_CAT]) if H_PRIORITY_CAT in df_hires.columns else [],       key="h_pricat")
 
         # Row 4 — FY, Quarter & Start Month
         hf4a, hf4b, hf4c, _ = st.columns(4)
         with hf4a:
-            hfy  = st.multiselect("Target FY", clean_options(df_hires[H_TARGET_FY]),  key="h_fy")
+            hfy  = ms_with_all("Target FY", clean_options(df_hires[H_TARGET_FY]),  key="h_fy")
         with hf4b:
-            hqtr = st.multiselect("Quarter",   clean_options(df_hires[H_TARGET_QTR]), key="h_qtr")
+            hqtr = ms_with_all("Quarter",   clean_options(df_hires[H_TARGET_QTR]), key="h_qtr")
         with hf4c:
             _month_opts = (
                 df_hires.dropna(subset=["_month_sort"])
@@ -892,16 +924,16 @@ with tab2:
                 .sort_values("_month_sort")["Month Label"]
                 .tolist()
             )
-            hmonth = st.multiselect("Start Month", _month_opts, key="h_month")
+            hmonth = ms_with_all("Start Month", _month_opts, key="h_month")
 
         # Row 5 — Career Track / Community / Tech Community
         hf5a, hf5b, hf5c, _ = st.columns(4)
         with hf5a:
-            hct  = st.multiselect("Career Track",   clean_options(df_hires[H_CAREER_TRACK]) if H_CAREER_TRACK in df_hires.columns else [], key="h_ct")
+            hct  = ms_with_all("Career Track",   clean_options(df_hires[H_CAREER_TRACK]) if H_CAREER_TRACK in df_hires.columns else [], key="h_ct")
         with hf5b:
-            hcom = st.multiselect("Community",      clean_options(df_hires[H_COMMUNITY])    if H_COMMUNITY    in df_hires.columns else [], key="h_com")
+            hcom = ms_with_all("Community",      clean_options(df_hires[H_COMMUNITY])    if H_COMMUNITY    in df_hires.columns else [], key="h_com")
         with hf5c:
-            htc  = st.multiselect("Tech Community", clean_options(df_hires[H_TECH_COMM])    if H_TECH_COMM    in df_hires.columns else [], key="h_tc")
+            htc  = ms_with_all("Tech Community", clean_options(df_hires[H_TECH_COMM])    if H_TECH_COMM    in df_hires.columns else [], key="h_tc")
 
         st.markdown("</div>", unsafe_allow_html=True)
 
@@ -1059,35 +1091,35 @@ with tab3:
         # Row 1 — Org hierarchy
         af1a, af1b, af1c, af1d = st.columns(4)
         with af1a:
-            al2 = st.multiselect("Org Level 2", clean_options(df_actual_hires[A_L2]), key="a_l2")
+            al2   = ms_with_all("Org Level 2", clean_options(df_actual_hires[A_L2]),   key="a_l2")
         with af1b:
-            al3 = st.multiselect("Org Level 3", clean_options(df_actual_hires[A_L3]), key="a_l3")
+            al3   = ms_with_all("Org Level 3", clean_options(df_actual_hires[A_L3]),   key="a_l3")
         with af1c:
-            al4 = st.multiselect("Org Level 4", clean_options(df_actual_hires[A_L4]), key="a_l4")
+            al4   = ms_with_all("Org Level 4", clean_options(df_actual_hires[A_L4]),   key="a_l4")
         with af1d:
-            aband = st.multiselect("Band", clean_options(df_actual_hires[A_BAND]), key="a_band")
+            aband = ms_with_all("Band",         clean_options(df_actual_hires[A_BAND]), key="a_band")
 
         # Row 2 — Job dimensions
         af2a, af2b, af2c, af2d = st.columns(4)
         with af2a:
-            ajfg = st.multiselect("Job Family Group", clean_options(df_actual_hires[A_JOB_FAM_GRP]), key="a_jfg")
+            ajfg = ms_with_all("Job Family Group", clean_options(df_actual_hires[A_JOB_FAM_GRP]), key="a_jfg")
         with af2b:
-            ajf  = st.multiselect("Job Family",       clean_options(df_actual_hires[A_JOB_FAMILY]),  key="a_jf")
+            ajf  = ms_with_all("Job Family",       clean_options(df_actual_hires[A_JOB_FAMILY]),  key="a_jf")
         with af2c:
-            ajl  = st.multiselect("Job Level",        clean_options(df_actual_hires[A_JOB_LEVEL]),   key="a_jl")
+            ajl  = ms_with_all("Job Level",        clean_options(df_actual_hires[A_JOB_LEVEL]),   key="a_jl")
         with af2d:
-            aht  = st.multiselect("Hire Type",        clean_options(df_actual_hires[A_HIRE_TYPE]),   key="a_ht")
+            aht  = ms_with_all("Hire Type",        clean_options(df_actual_hires[A_HIRE_TYPE]),   key="a_ht")
 
         # Row 3 — People & Track
         af3a, af3b, af3c, af3d = st.columns(4)
         with af3a:
-            act  = st.multiselect("Career Track",   clean_options(df_actual_hires[A_CAREER_TRACK]), key="a_ct")
+            act  = ms_with_all("Career Track",   clean_options(df_actual_hires[A_CAREER_TRACK]), key="a_ct")
         with af3b:
-            acom = st.multiselect("Community",      clean_options(df_actual_hires[A_COMMUNITY]),    key="a_com")
+            acom = ms_with_all("Community",      clean_options(df_actual_hires[A_COMMUNITY]),    key="a_com")
         with af3c:
-            atc  = st.multiselect("Tech Community", clean_options(df_actual_hires[A_TECH_COMM]),    key="a_tc")
+            atc  = ms_with_all("Tech Community", clean_options(df_actual_hires[A_TECH_COMM]),    key="a_tc")
         with af3d:
-            afy  = st.multiselect("Fiscal Year",    clean_options(df_actual_hires[A_FISCAL_YEAR]),  key="a_fy")
+            afy  = ms_with_all("Fiscal Year",    clean_options(df_actual_hires[A_FISCAL_YEAR]),  key="a_fy")
 
         st.markdown("</div>", unsafe_allow_html=True)
 
