@@ -472,42 +472,32 @@ def simple_summary(df, group_col, val_col="count") -> pd.DataFrame:
 _ALL = "✅ Select All"
 
 def ms_with_all(label: str, options: list, key: str, default=None) -> list:
-    """Multiselect with Select All support.
+    """Multiselect with Select All support using on_change callback.
 
-    Works by keeping all state in a shadow key (never binding the widget
-    key directly to session_state, so we can freely update it before render).
+    The on_change fires BEFORE the next render, so when Select All is
+    detected we swap the widget's own key value to the full list —
+    no rerun needed, no key conflicts.
 
     Workflow:
       1. Open dropdown → pick '✅ Select All' → all options appear selected
-      2. Click any tag (blue pill) to remove it
-      3. Empty = no filter = show everything
+      2. Click any blue pill tag to remove it
+      3. Empty selection = no filter = show everything
     """
-    shadow   = f"__{key}_val"
-    options  = list(options)
-    choices  = [_ALL] + options
+    options = list(options)
+    choices = [_ALL] + options
 
-    # Initialise shadow on first render
-    if shadow not in st.session_state:
-        st.session_state[shadow] = list(default or [])
+    def _on_change():
+        val = st.session_state[key]
+        if _ALL in val:
+            # Replace with all real options (no Select All pill in result)
+            st.session_state[key] = options
 
-    # If Select All was triggered last run, shadow already holds all options.
-    # Render the widget with shadow as the current value (no widget key —
-    # we manage state entirely through the shadow).
-    current  = st.session_state[shadow]
-    selected = st.multiselect(label, choices, default=current, key=key)
+    # Initialise default only on first render
+    if key not in st.session_state:
+        st.session_state[key] = list(default or [])
 
-    if _ALL in selected:
-        # Store all real options in shadow, delete the widget key so
-        # Streamlit re-initialises it from `default` on next render
-        st.session_state[shadow] = options
-        if key in st.session_state:
-            del st.session_state[key]
-        st.rerun()
-
-    # Normal interaction — sync shadow
-    cleaned = [v for v in selected if v != _ALL]
-    st.session_state[shadow] = cleaned
-    return cleaned
+    st.multiselect(label, choices, key=key, on_change=_on_change)
+    return st.session_state[key]
 
 def chart_base():
     return dict(
